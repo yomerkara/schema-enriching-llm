@@ -69,25 +69,75 @@ class MultiFormatProcessor:
         }
 
     def process_json_schema(self, json_input: str) -> Dict[str, Any]:
-        """Process JSON schema definition."""
+        """Process JSON schema definition OR actual JSON data."""
         try:
-            schema_def = json.loads(json_input)
+            parsed_json = json.loads(json_input)
 
-            # Generate sample data from schema
-            data = self._generate_data_from_json_schema(schema_def)
-            schema = self._infer_schema_from_sample_data(data, 'json_source')
+            if isinstance(parsed_json, list):
+                # Handle actual JSON data (array of objects)
+                if len(parsed_json) > 0:
+                    data = pd.DataFrame(parsed_json)
+                    schema = self._infer_schema_from_sample_data(data, 'json_data')
 
-            return {
-                'data': data,
-                'schema': schema,
-                'source_type': 'json_schema',
-                'metadata': {
-                    'schema_definition': schema_def,
-                    'processed_at': datetime.now().isoformat()
-                }
-            }
+                    return {
+                        'data': data,
+                        'schema': schema,
+                        'source_type': 'json_data',
+                        'metadata': {
+                            'record_count': len(parsed_json),
+                            'source_format': 'JSON Array',
+                            'processed_at': datetime.now().isoformat()
+                        }
+                    }
+                else:
+                    raise ValueError("Empty JSON array provided")
+
+            elif isinstance(parsed_json, dict):
+                # Check if it's a schema definition or single object
+                if self._is_schema_definition(parsed_json):
+                    # Handle schema definition
+                    data = self._generate_data_from_json_schema(parsed_json)
+                    schema = self._infer_schema_from_sample_data(data, 'json_schema')
+
+                    return {
+                        'data': data,
+                        'schema': schema,
+                        'source_type': 'json_schema',
+                        'metadata': {
+                            'schema_definition': parsed_json,
+                            'processed_at': datetime.now().isoformat()
+                        }
+                    }
+                else:
+                    # Handle single JSON object
+                    data = pd.DataFrame([parsed_json])
+                    schema = self._infer_schema_from_sample_data(data, 'json_object')
+
+                    return {
+                        'data': data,
+                        'schema': schema,
+                        'source_type': 'json_object',
+                        'metadata': {
+                            'record_count': 1,
+                            'processed_at': datetime.now().isoformat()
+                        }
+                    }
+            else:
+                raise ValueError("Unsupported JSON format")
+
         except json.JSONDecodeError as e:
-            raise ValueError(f"Invalid JSON schema: {str(e)}")
+            raise ValueError(f"Invalid JSON: {str(e)}")
+
+    def _is_schema_definition(self, json_obj: dict) -> bool:
+        """Determine if JSON object is a schema definition or actual data."""
+        # Schema definitions typically have simple string values indicating types
+        schema_types = ['string', 'integer', 'float', 'boolean', 'date', 'datetime']
+
+        values = list(json_obj.values())
+        # If most values are type definitions, it's likely a schema
+        type_matches = sum(1 for v in values if isinstance(v, str) and v.lower() in schema_types)
+
+        return type_matches > len(values) * 0.7  # 70% threshold
 
     def generate_sample_data(self, sample_type: str, size: int = 10000) -> Dict[str, Any]:
         """Generate industry-specific sample datasets."""
